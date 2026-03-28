@@ -34,7 +34,14 @@
   - 環境変数 `LINE_CHANNEL_ACCESS_TOKEN` でトークン管理
   - エラーハンドリング・normalizeResult の実レスポンス対応
   - テストスクリプト（scripts/test-line.ts）でトークン検証＋canSendロジック確認済み
-- 2026-03-28: **レビュー画面をPrisma Postgresに接続（リアルデータ化���**
+- 2026-03-28: **LINE Webhook による自動Contact登録を実装**
+  - `POST /api/webhook/line` — LINE公式アカウントへの友達追加でContactを自動作成
+  - follow: 新規Contact作成（LINE Profile APIで名前取得）/ 再follow: optOut解除
+  - unfollow: optOutLine=true に設定
+  - HMAC-SHA256 署名検証（LINE_CHANNEL_SECRET）
+  - テスト7件追加（全79テスト通過）
+  - `docs/manual.md` — ユーザーマニュアル作成
+- 2026-03-28: **レビュー画面をPrisma Postgresに接続（リアルデータ化）**
   - `src/lib/db.ts` — PrismaClient singleton（`@prisma/adapter-pg` 経由でPrisma Postgres接続）
   - `GET /api/campaigns/[id]/review` — DBからキャンペーン・Message・Contact情報を取得するAPIルート新設
   - `POST /api/orchestrator/approve` — DB書き込みに移行（Messageステータス更新・AuditLog記録・トランザクション）
