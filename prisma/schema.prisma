@@ -1,0 +1,80 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Campaign {
+  id          String   @id @default(cuid())
+  name        String
+  productJson Json     // ProductInput
+  analysisJson Json?   // ProductAnalysis
+  segmentJson Json     // Segment
+  status      String   @default("draft") // draft|analyzing|generating|review|approved|sent
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  messages Message[]
+}
+
+model Contact {
+  id           String   @id @default(cuid())
+  name         String
+  platformId   String?
+  platform     String?  // twitter|connpass|line|did-event
+  attributesJson Json   // ContactAttributes
+  behaviorsJson  Json   // ContactBehavior[]
+  createdAt    DateTime @default(now())
+
+  // ─── チャネル到達情報 ───
+  email              String?
+  lineUserId         String?
+  messengerPsid      String?
+  preferredChannel   String?  // mail|line|messenger
+  lineLinkedAt       DateTime?
+  messengerLastInboundAt DateTime?
+  optOutEmail        Boolean  @default(false)
+  optOutLine         Boolean  @default(false)
+  optOutMessenger    Boolean  @default(false)
+
+  messages   Message[]
+  deliveries Delivery[]
+}
+
+model Message {
+  id            String   @id @default(cuid())
+  campaignId    String
+  contactId     String
+  variantsJson  Json     // MessageVariant[]
+  approvedIndex Int?
+  status        String   @default("draft") // draft|approved|sent|delivered|replied
+  sentAt        DateTime?
+  createdAt     DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+  contact  Contact  @relation(fields: [contactId], references: [id])
+
+  results OutreachResult[]
+}
+
+model OutreachResult {
+  id           String   @id @default(cuid())
+  messageId    String
+  outcome      String   // no-response|opened|replied|converted
+  replySnippet String?
+  createdAt    DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id])
+}
+
+model PromptIteration {
+  id              String   @id @default(cuid())
+  version         Int      @unique
+  prompt          String
+  avgOutcomeScore Float
+  changeNote      String
+  createdAt       DateTime @default(now())
+}

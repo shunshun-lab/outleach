@@ -1,0 +1,180 @@
+あなたは既存プロダクトの慎重な実装担当です。
+目的は、Outreach App に送信チャネル抽象化を導入し、Mail をデフォルトのまま維持しつつ、LINE を追加し、Messenger を条件付きチャネルとして追加することです。
+
+最重要制約:
+1. 人間の Approve があるまで送信は絶対に実行しないこと
+2. 既存機能を壊さないこと
+3. 破壊的変更を避けること
+4. DBの全消去、既存データの削除、危険な migration を行わないこと
+5. 実装前に影響範囲を確認し、小さく安全に進めること
+6. 不明点はコードベースから推定し、まず安全側で実装すること
+7. 実装内容・変更理由・戻し方を docs に残すこと
+
+やりたいこと:
+- 現在の default channel は Mail
+- 可能なら LINE でも送れるようにする
+- Messenger でも送れるようにするが、制約の強い条件付きチャネルとして扱う
+- チャネル選択は contact ごとに行う
+- Approve 前は generate / review までで止まり、send は進まない
+- 承認された target のみ queue 経由で送る
+
+実装方針:
+A. 送信チャネルを adapter pattern で抽象化する
+B. 既存 mail 実装を MailChannelAdapter に寄せる
+C. LINE 用 LineChannelAdapter を追加する
+D. Messenger 用 MessengerChannelAdapter を追加する
+E. チャネルごとの送信可否判定を DeliveryPolicy に集約する
+F. review UI で contact ごとの candidate channel / selected channel を確認できるようにする
+G. queue worker は selected channel に応じて adapter を呼び出す
+H. 送信結果は channel ごとに統一フォーマットで保存する
+
+前提ルール:
+- Mail はデフォルト fallback
+- LINE は lineUserId 等の到達条件がある場合のみ候補化
+- Messenger は messengerPsid 等に加えて「現行の運用制約を満たす場合のみ」候補化
+- 条件を満たさないチャネルは review 対象に出さない、または disabled 表示にする
+- converted / opt-out / blacklist / recent-contacted の相手は除外できる構造を維持または追加
+- 同一 campaign で同一 contact への二重送信を防ぐ
+- idempotency を必ず入れる
+
+必須成果物:
+1. 現状調査
+ - 現在の campaign -> analyze -> generate -> review -> approve -> send のコード経路を特定
+ - 送信処理、queue、worker、message persistence、contact model、approval gate の位置を特定
+ - 変更対象ファイル一覧を出す
+
+2. 設計
+ - ChannelAdapter interface を定義
+ - 少なくとも以下を持つ:
+ - channelType
+ - canSend(contact, campaign, context)
+ - send(messageDraft, contact, context)
+ - normalizeResult(providerResponse)
+ - DeliveryPolicy / ChannelResolver を定義し、
+ contact 単位で availableChannels / recommendedChannel / fallbackChannel を返すようにする
+
+3. データモデルの最小拡張
+ 既存 schema を壊さない形で必要最小限の追加を行うこと
+ 候補:
+ - Contact:
+ - email
+ - lineUserId
+ - messengerPsid
+ - preferredChannel
+ - lineLinkedAt
+ - messengerLastInboundAt
+ - optOutEmail
+ - optOutLine
+ - optOutMessenger
+ - Message or Delivery:
+ - channel
+ - providerMessageId
+ - deliveryStatus
+ - idempotencyKey
+ - approvedBy
+ - approvedAt
+ ただし既存モデルがあるならそれに寄せ、重複した概念を増やしすぎないこと
+
+4. approval gate の維持
+ - generate 後は必ず paused / review で止まること
+ - approve 対象 targetId のみ送信キューに積むこと
+ - approve なし送信の経路が存在しないことを確認する
+ - state machine / service layer / API route のどこで強制するか明示すること
+
+5. UI変更
+ - review 画面に以下を表示:
+ - target
+ - relevanceScore
+ - matchedAngle
+ - message variants
+ - available channels
+ - selected channel
+ - default selected channel は resolver の recommendedChannel
+ - 必要なら reviewer が channel を変更可能
+ - ただし送信不能チャネルは選択不可
+
+6. queue / worker
+ - BullMQ 等の既存キューを維持
+ - job payload に channel を含める
+ - worker は adapter を引いて送る
+ - 一時失敗 / 永続失敗を区別
+ - retry 戦略を実装
+ - 同一 idempotencyKey で重複送信しない
+
+7. 監査ログ
+ 以下を記録:
+ - 誰が approve したか
+ - どの targetId を承認したか
+ - どの channel が選ばれたか
+ - message が review 中に編集されたか
+ - queue 投入時刻
+ - 送信結果
+
+8. ドキュメント更新
+ docs/outreach-channel-architecture.md
+ docs/outreach-ops-manual.md
+ などに以下を反映:
+ - Mail default
+ - LINE available if linked
+ - Messenger conditional
+ - Approve 必須
+ - opt-out / duplicate prevention / channel rules
+
+実装の進め方:
+Phase 1: 調査のみ
+- まずコードベースを読み、関連箇所を列挙
+- 実装前に「どこをどう変えるか」を短くまとめる
+- この時点ではコード変更しない
+
+Phase 2: 安全な抽象化
+- 既存 Mail 送信処理を ChannelAdapter 化
+- 振る舞いを変えずに抽象化だけ先に行う
+- 既存テストがあるなら通す
+
+Phase 3: LINE 追加
+- provider client を wrapper 化
+- canSend 判定を追加
+- review / approve / worker まで通す
+- Mail fallback を維持
+
+Phase 4: Messenger 追加
+- Messenger は条件付き送信
+- 現行制約をコード上で判定可能なら判定
+- 判定が曖昧な場合は safe default で send 不可に倒す
+- review UI には理由付き disabled 表示でもよい
+
+Phase 5: テストと docs
+- unit test
+- integration test
+- queue/worker の最低限のE2E
+- docs 追加
+- rollback 手順も書く
+
+禁止事項:
+- 全件対象の broadcast を有効にしないこと
+- approval を bypass しないこと
+- console.log に個人情報を出さないこと
+- 本番資格情報を仮定しないこと
+- 送信テストで実在ユーザーへ送らないこと
+- 大規模な schema 全面作り直しをしないこと
+
+受け入れ条件:
+- Mail は従来通り送れる
+- review 画面で channel 候補が見える
+- approve した target のみ送られる
+- LINE 対象には LINE 送信できる
+- Messenger は条件を満たす対象にのみ送信候補になる
+- 条件を満たさない Messenger は送れない
+- paused -> approve -> queued -> sent の流れが壊れない
+- 二重送信しない
+- docs が更新される
+
+出力形式:
+1. まず調査結果
+2. 次に変更計画
+3. 次に実装
+4. 最後に changed files / テスト結果 / 残課題 / rollback 方法
+
+上記の手順に従って、outreach-appディレクトリ内で作業を完遂してください。
+作業完了後、結果のサマリーを `docs/outreach-channel-implementation-summary.md` に出力し、以下のコマンドで通知してください:
+openclaw system event --text "Done: 送信チャネル抽象化の実装が完了しました。詳細は docs/outreach-channel-implementation-summary.md を確認してください。" --mode now
