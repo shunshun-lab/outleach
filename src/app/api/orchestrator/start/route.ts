@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
-import { PipelineOrchestrator, InMemoryPipelineStore } from "@/lib/orchestrator";
+import { orchestrator, store } from "@/lib/orchestrator/singleton";
 import type { ProductInput, Contact } from "@/types";
 
 // シングルトンストア（Prisma 移行前の暫定）
-const store = new InMemoryPipelineStore();
-const orchestrator = new PipelineOrchestrator(store);
 
-export { orchestrator, store };
+
 
 /**
  * POST /api/orchestrator/start

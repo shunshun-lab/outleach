@@ -40,15 +40,13 @@ ${product.date ? `日時: ${product.date}` : ""}
 ${product.location ? `場所: ${product.location}` : ""}
 ${product.tags?.length ? `タグ: ${product.tags.join(", ")}` : ""}`;
 
-  const response = await client.messages.create({
+  const response = await client.models.generateContent({
     model: MODEL,
-    max_tokens: 2000,
-    messages: [{ role: "user", content: userMessage }],
-    system: SYSTEM_PROMPT,
+    contents: userMessage,
+    config: { systemInstruction: SYSTEM_PROMPT },
   });
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
+  const text = response.text ?? "";
 
   // JSONブロックを抽出
   const jsonMatch = text.match(/\{[\s\S]*\}/);

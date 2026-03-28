@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { ChannelType, ChannelResolution } from "@/types/channel";
 
-type ReviewTarget = {
+export type ReviewTarget = {
   contactId: string;
   contactName: string;
   contactPlatform?: string;
@@ -56,6 +56,9 @@ export function ReviewPanel({
     }
     return initial;
   });
+  const [editedMessages, setEditedMessages] = useState<
+    Record<string, Record<number, string>>
+  >({});
   const [approvedBy, setApprovedBy] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<string | null>(null);
@@ -77,6 +80,21 @@ export function ReviewPanel({
   const selectAll = () =>
     setSelectedTargets(new Set(targets.map((t) => t.contactId)));
   const deselectAll = () => setSelectedTargets(new Set());
+
+  const handleMessageEdit = (
+    contactId: string,
+    variantIndex: number,
+    newBody: string
+  ) => {
+    setEditedMessages((prev) => ({
+      ...prev,
+      [contactId]: { ...prev[contactId], [variantIndex]: newBody },
+    }));
+  };
+
+  const getMessageBody = (contactId: string, variantIndex: number, original: string) => {
+    return editedMessages[contactId]?.[variantIndex] ?? original;
+  };
 
   const handleChannelChange = (contactId: string, channel: ChannelType) => {
     setChannelSelections((prev) => ({ ...prev, [contactId]: channel }));
@@ -100,6 +118,14 @@ export function ReviewPanel({
         approvedChannels[id] = channelSelections[id] ?? "mail";
       }
 
+      // Build edited messages map: { contactId: { variantIndex: editedBody } }
+      const editedMessagesPayload: Record<string, Record<number, string>> = {};
+      for (const id of approvedTargetIds) {
+        if (editedMessages[id]) {
+          editedMessagesPayload[id] = editedMessages[id];
+        }
+      }
+
       const res = await fetch("/api/orchestrator/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -107,6 +133,9 @@ export function ReviewPanel({
           runId,
           approvedTargetIds,
           approvedChannels,
+          editedMessages: Object.keys(editedMessagesPayload).length > 0
+            ? editedMessagesPayload
+            : undefined,
           approvedBy: approvedBy.trim(),
         }),
       });
@@ -211,29 +240,58 @@ export function ReviewPanel({
                 </div>
               </div>
 
-              {/* メッセージバリアント */}
+              {/* メッセージバリアント（編集可能） */}
               <div className="mt-3 space-y-2">
-                {target.messageVariants.map((variant, i) => (
-                  <div
-                    key={i}
-                    className="bg-white border rounded p-3 text-sm"
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-medium text-gray-400">
-                        案{i + 1}
-                      </span>
-                      <span className="text-xs text-gray-400">
-                        ({variant.angle})
-                      </span>
-                      {!variant.passedWordCheck && (
-                        <span className="text-xs text-red-500">
-                          禁止ワード検出
+                {target.messageVariants.map((variant, i) => {
+                  const currentBody = getMessageBody(target.contactId, i, variant.body);
+                  const isEdited = editedMessages[target.contactId]?.[i] !== undefined
+                    && editedMessages[target.contactId][i] !== variant.body;
+
+                  return (
+                    <div
+                      key={i}
+                      className={`bg-white border rounded p-3 text-sm ${
+                        isEdited ? "border-amber-300" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-medium text-gray-400">
+                          案{i + 1}
                         </span>
+                        <span className="text-xs text-gray-400">
+                          ({variant.angle})
+                        </span>
+                        {variant.qualityScore !== undefined && (
+                          <span className="text-xs text-gray-400">
+                            品質: {variant.qualityScore}
+                          </span>
+                        )}
+                        {!variant.passedWordCheck && (
+                          <span className="text-xs text-red-500 font-medium">
+                            禁止ワード検出
+                          </span>
+                        )}
+                        {isEdited && (
+                          <span className="text-xs text-amber-600 font-medium">
+                            編集済み
+                          </span>
+                        )}
+                      </div>
+                      {isPaused ? (
+                        <textarea
+                          value={currentBody}
+                          onChange={(e) =>
+                            handleMessageEdit(target.contactId, i, e.target.value)
+                          }
+                          rows={3}
+                          className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm resize-y focus:outline-none focus:ring-1 focus:ring-blue-300 focus:border-blue-300"
+                        />
+                      ) : (
+                        <p>{currentBody}</p>
                       )}
                     </div>
-                    <p>{variant.body}</p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* チャネル選択 */}

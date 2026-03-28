@@ -7,5 +7,5 @@ export {
   resolveChannelsBatch,
   canSendVia,
 } from "./resolver";
-export { generateIdempotencyKey } from "./idempotency";
+export { generateIdempotencyKey, generateSequenceIdempotencyKey } from "./idempotency";
 export { writeAuditLog, getAuditLogs, getAuditLogsByAction } from "./audit";

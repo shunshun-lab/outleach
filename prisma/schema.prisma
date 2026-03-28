@@ -17,7 +17,8 @@ model Campaign {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  messages Message[]
+  messages  Message[]
+  sequences Sequence[]
 }
 
 model Contact {
@@ -40,8 +41,12 @@ model Contact {
   optOutLine         Boolean  @default(false)
   optOutMessenger    Boolean  @default(false)
 
+  tagsJson   Json?    // string[] — 動的タグ（interests等）
+
   messages   Message[]
   deliveries Delivery[]
+  sequences  Sequence[]
+  actionLogs ActionLog[]
 }
 
 model Message {
@@ -124,4 +129,82 @@ model PromptIteration {
   avgOutcomeScore Float
   changeNote      String
   createdAt       DateTime @default(now())
+}
+
+// ─── シーケンス配信（ケイデンス機能） ───
+
+model Sequence {
+  id          String   @id @default(cuid())
+  campaignId  String
+  contactId   String
+  status      String   @default("draft") // draft|approved|active|paused|completed|cancelled|responded
+  approvedBy  String?
+  approvedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+  contact  Contact  @relation(fields: [contactId], references: [id])
+  steps    SequenceStep[]
+  actionLogs ActionLog[]
+
+  @@index([campaignId])
+  @@index([contactId])
+  @@index([status])
+}
+
+model SequenceStep {
+  id             String    @id @default(cuid())
+  sequenceId     String
+  stepOrder      Int       // 0-based: 0=初回, 1=フォロー, 2=クロージング...
+  delayHours     Int       @default(0) // 前のステップからの遅延時間
+  channel        String    // mail|line|messenger
+  body           String    // メッセージ本文
+  angle          String    // 使用した切り口
+  subject        String?   // mail用件名
+  status         String    @default("pending") // pending|scheduled|sent|delivered|cancelled|failed
+  scheduledAt    DateTime?
+  sentAt         DateTime?
+  idempotencyKey String?   @unique
+  jobId          String?   // BullMQ等のジョブID
+  variantsJson   Json?     // A/Bテスト用の代替案 MessageVariant[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  sequence      Sequence       @relation(fields: [sequenceId], references: [id])
+  trackingLinks TrackingLink[]
+
+  @@unique([sequenceId, stepOrder])
+  @@index([status])
+  @@index([scheduledAt])
+}
+
+model TrackingLink {
+  id              String    @id @default(cuid())
+  sequenceStepId  String
+  originalUrl     String
+  trackingToken   String    @unique
+  clickedAt       DateTime?
+  clickCount      Int       @default(0)
+  createdAt       DateTime  @default(now())
+
+  sequenceStep SequenceStep @relation(fields: [sequenceStepId], references: [id])
+
+  @@index([trackingToken])
+}
+
+model ActionLog {
+  id          String   @id @default(cuid())
+  contactId   String
+  sequenceId  String?
+  type        String   // reply|conversion|link_click|opt_out|tag_added
+  payloadJson Json?    // アクション固有のデータ
+  createdAt   DateTime @default(now())
+
+  contact  Contact   @relation(fields: [contactId], references: [id])
+  sequence Sequence? @relation(fields: [sequenceId], references: [id])
+
+  @@index([contactId])
+  @@index([sequenceId])
+  @@index([type])
 }

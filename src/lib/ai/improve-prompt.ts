@@ -137,15 +137,13 @@ ${summary.failureExamples.map((e) => `- [${e.outcome}] ${e.body}`).join("\n")}
 
 改善版プロンプトを生成してください。`;
 
-  const response = await client.messages.create({
+  const response = await client.models.generateContent({
     model: MODEL,
-    max_tokens: 3000,
-    messages: [{ role: "user", content: userMessage }],
-    system: IMPROVEMENT_SYSTEM_PROMPT,
+    contents: userMessage,
+    config: { systemInstruction: IMPROVEMENT_SYSTEM_PROMPT },
   });
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
+  const text = response.text ?? "";
 
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {

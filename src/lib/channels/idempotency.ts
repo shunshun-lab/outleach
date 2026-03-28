@@ -16,3 +16,15 @@ export function generateIdempotencyKey(
   const hash = createHash("sha256").update(input).digest("hex").slice(0, 16);
   return `idem_${hash}`;
 }
+
+/** シーケンスステップ用の冪等性キー（チャネル+ステップ番号で一意） */
+export function generateSequenceIdempotencyKey(
+  campaignId: string,
+  contactId: string,
+  channel: ChannelType,
+  stepOrder: number
+): string {
+  const input = `${campaignId}:${contactId}:${channel}:step${stepOrder}`;
+  const hash = createHash("sha256").update(input).digest("hex").slice(0, 16);
+  return `idem_seq_${hash}`;
+}

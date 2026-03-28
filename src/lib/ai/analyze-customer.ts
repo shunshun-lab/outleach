@@ -51,15 +51,13 @@ ${contact.attributes.interests?.length ? `興味タグ: ${contact.attributes.int
 行動履歴:
 ${contact.behaviors.map((b) => `- ${b.type}: ${b.detail}${b.date ? ` (${b.date})` : ""}`).join("\n") || "なし"}`;
 
-  const response = await client.messages.create({
+  const response = await client.models.generateContent({
     model: MODEL,
-    max_tokens: 1000,
-    messages: [{ role: "user", content: userMessage }],
-    system: SYSTEM_PROMPT,
+    contents: userMessage,
+    config: { systemInstruction: SYSTEM_PROMPT },
   });
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
+  const text = response.text ?? "";
 
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {

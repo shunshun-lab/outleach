@@ -12,6 +12,7 @@ import type {
   MessageVariant,
   ChannelType,
   ChannelResolution,
+  GeneratedSequenceStep,
 } from "@/types";
 
 // ─── パイプラインステップ ───
@@ -61,6 +62,10 @@ export type PipelineInput = {
   options?: {
     customPrompt?: string;
     relevanceThreshold?: number;
+    /** シーケンスモードを有効にする（複数ステップのアプローチ） */
+    useSequence?: boolean;
+    /** シーケンスのステップ数（デフォルト3） */
+    sequenceStepCount?: number;
   };
 };
 
@@ -76,6 +81,13 @@ export type PipelineState = {
   approvedBy?: string;
   /** 承認日時 */
   approvedAt?: string; // ISO string for serialization
+  /** シーケンス生成結果（シーケンスモード時） */
+  generatedSequences?: Array<{
+    contactId: string;
+    steps: GeneratedSequenceStep[];
+  }>;
+  /** シーケンスモードか（true の場合、シーケンス生成を使用） */
+  useSequence?: boolean;
 };
 
 export type CustomerResult = {

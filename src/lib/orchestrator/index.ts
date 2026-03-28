@@ -24,3 +24,18 @@ export {
   canResume,
   canCancel,
 } from "./state-machine";
+
+// ─── シーケンス機能 ───
+export { InMemorySequenceScheduler } from "./sequence-scheduler";
+export {
+  handleAction,
+  cancelActiveSequences,
+  InMemorySequenceStore,
+} from "./auto-pause";
+export type { SequenceStore, ActionInput } from "./auto-pause";
+export {
+  createSequence,
+  approveSequence,
+  scheduleSequence,
+} from "./sequence-manager";
+export { handleSequenceGenerate } from "./sequence-steps";

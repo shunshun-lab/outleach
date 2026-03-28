@@ -70,15 +70,13 @@ ${context.matchReason ? `理由: ${context.matchReason}` : ""}
 
 ${variantCount}案のメッセージを生成してください。`;
 
-  const response = await client.messages.create({
+  const response = await client.models.generateContent({
     model: MODEL,
-    max_tokens: 1500,
-    messages: [{ role: "user", content: userMessage }],
-    system: systemPrompt,
+    contents: userMessage,
+    config: { systemInstruction: systemPrompt },
   });
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
+  const text = response.text ?? "";
 
   const jsonMatch = text.match(/\[[\s\S]*\]/);
   if (!jsonMatch) {
