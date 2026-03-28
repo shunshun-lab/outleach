@@ -19,6 +19,7 @@ import type {
   PipelineEvent,
   PipelineEventHandler,
 } from "./types";
+import type { ChannelType } from "@/types";
 import { PIPELINE_STEPS } from "./types";
 import {
   getNextStep,
@@ -70,8 +71,20 @@ export class PipelineOrchestrator {
     return run.id;
   }
 
-  /** 一時停止中のパイプラインを承認して再開する */
-  async approve(runId: string, approvedTargetIds: string[]): Promise<void> {
+  /**
+   * 一時停止中のパイプラインを承認して再開する
+   *
+   * @param approvedChannels - contactId -> 選択チャネル のマップ（省略時は resolver の推奨を使用）
+   * @param approvedBy - 承認者ID
+   */
+  async approve(
+    runId: string,
+    approvedTargetIds: string[],
+    options?: {
+      approvedChannels?: Record<string, ChannelType>;
+      approvedBy?: string;
+    }
+  ): Promise<void> {
     const run = await this.getRunOrThrow(runId);
 
     if (!canResume(run.status)) {
@@ -86,7 +99,16 @@ export class PipelineOrchestrator {
       );
     }
 
-    await this.store.updateState(runId, { approvedTargetIds });
+    if (approvedTargetIds.length === 0) {
+      throw new Error("承認するターゲットが指定されていません");
+    }
+
+    await this.store.updateState(runId, {
+      approvedTargetIds,
+      approvedChannels: options?.approvedChannels,
+      approvedBy: options?.approvedBy ?? "unknown",
+      approvedAt: new Date().toISOString(),
+    });
     this.emit({ type: "pipeline:resumed", runId, step: "review" });
 
     const nextStep = getNextStep("review");

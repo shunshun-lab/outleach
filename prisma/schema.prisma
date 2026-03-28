@@ -54,10 +54,19 @@ model Message {
   sentAt        DateTime?
   createdAt     DateTime @default(now())
 
+  // ─── チャネル関連 ───
+  channel          String?  // mail|line|messenger
+  providerMessageId String?
+  deliveryStatus   String?  // queued|sent|delivered|failed|bounced|rejected
+  idempotencyKey   String?  @unique
+  approvedBy       String?
+  approvedAt       DateTime?
+
   campaign Campaign @relation(fields: [campaignId], references: [id])
   contact  Contact  @relation(fields: [contactId], references: [id])
 
-  results OutreachResult[]
+  results    OutreachResult[]
+  deliveries Delivery[]
 }
 
 model OutreachResult {
@@ -68,6 +77,44 @@ model OutreachResult {
   createdAt    DateTime @default(now())
 
   message Message @relation(fields: [messageId], references: [id])
+}
+
+model Delivery {
+  id               String   @id @default(cuid())
+  messageId        String
+  contactId        String
+  campaignId       String
+  channel          String   // mail|line|messenger
+  idempotencyKey   String   @unique
+  providerMessageId String?
+  status           String   @default("queued") // queued|sent|delivered|failed|bounced|rejected
+  error            String?
+  attemptCount     Int      @default(0)
+  lastAttemptAt    DateTime?
+  sentAt           DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  message Message  @relation(fields: [messageId], references: [id])
+  contact Contact  @relation(fields: [contactId], references: [id])
+
+  @@index([campaignId, contactId, channel])
+  @@index([idempotencyKey])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  action      String   // approve|reject|channel_select|message_edit|queue_submit|send_success|send_failure
+  campaignId  String
+  targetId    String?
+  contactId   String?
+  channel     String?
+  performedBy String
+  detailsJson Json?
+  createdAt   DateTime @default(now())
+
+  @@index([campaignId])
+  @@index([action])
 }
 
 model PromptIteration {

@@ -7,7 +7,9 @@
 import { decomposeProduct } from "@/lib/ai/decompose-product";
 import { analyzeCustomer } from "@/lib/ai/analyze-customer";
 import { generateMessages } from "@/lib/ai/generate-message";
-import type { ContactContext } from "@/types";
+import { getAdapter, resolveChannels } from "@/lib/channels";
+import { generateIdempotencyKey } from "@/lib/channels/idempotency";
+import type { ContactContext, ChannelContact, ChannelType } from "@/types";
 import type {
   PipelineStep,
   PipelineRun,
@@ -85,6 +87,24 @@ const handleGenerate: StepHandler = async (run) => {
       customPrompt: run.input.options?.customPrompt,
     });
 
+    // チャネル解決
+    const channelContact: ChannelContact = {
+      id: result.contact.id,
+      name: result.contact.name,
+      email: result.contact.email,
+      lineUserId: result.contact.lineUserId,
+      messengerPsid: result.contact.messengerPsid,
+      preferredChannel: result.contact.preferredChannel,
+      optOutChannels: result.contact.optOutChannels,
+      platform: result.contact.platform,
+      lineLinkedAt: result.contact.lineLinkedAt,
+      messengerLastInboundAt: result.contact.messengerLastInboundAt,
+    };
+    const channelResolution = resolveChannels(channelContact, {
+      campaignId: run.campaignId,
+      campaignName: "",
+    });
+
     targets.push({
       contactId: result.contact.id,
       contact: result.contact,
@@ -92,6 +112,7 @@ const handleGenerate: StepHandler = async (run) => {
       matchReason: result.matchReason,
       relevanceScore: result.relevanceScore,
       messages,
+      channelResolution,
     });
   }
 
@@ -115,10 +136,8 @@ const handleReview: StepHandler = async (_run) => {
 // ─── Step 5: 送信実行 ───
 
 const handleSend: StepHandler = async (run) => {
-  // 送信ロジックは今後 BullMQ キューに委譲する。
-  // 現時点では承認済みターゲットのマーキングのみ行う。
-  const approved = run.state.approvedTargetIds ?? [];
-  if (approved.length === 0) {
+  const approvedIds = run.state.approvedTargetIds ?? [];
+  if (approvedIds.length === 0) {
     return {
       status: "failed",
       stateUpdate: {},
@@ -126,8 +145,126 @@ const handleSend: StepHandler = async (run) => {
     };
   }
 
-  // TODO: BullMQ への送信ジョブ投入
-  // channels/ モジュールと連携して実際の送信を行う
+  const targets = run.state.generatedMessages ?? [];
+  const approvedChannels = run.state.approvedChannels ?? {};
+  const approvedSet = new Set(approvedIds);
+
+  const results: Array<{
+    contactId: string;
+    channel: ChannelType;
+    success: boolean;
+    error?: string;
+  }> = [];
+
+  for (const target of targets) {
+    if (!approvedSet.has(target.contactId)) continue;
+
+    // チャネル決定: 承認時の明示選択 > resolver の推奨 > mail fallback
+    const channel: ChannelType =
+      approvedChannels[target.contactId] ??
+      target.channelResolution?.recommendedChannel ??
+      "mail";
+
+    const adapter = getAdapter(channel);
+
+    // 冪等性キー生成
+    const idempotencyKey = generateIdempotencyKey(
+      run.campaignId,
+      target.contactId,
+      channel
+    );
+
+    // 送信メッセージ選択（最初のバリアントを使用）
+    const message = target.messages[0];
+    if (!message) continue;
+
+    const channelContact: ChannelContact = {
+      id: target.contact.id,
+      name: target.contact.name,
+      email: target.contact.email,
+      lineUserId: target.contact.lineUserId,
+      messengerPsid: target.contact.messengerPsid,
+      preferredChannel: target.contact.preferredChannel,
+      optOutChannels: target.contact.optOutChannels,
+      platform: target.contact.platform,
+      lineLinkedAt: target.contact.lineLinkedAt,
+      messengerLastInboundAt: target.contact.messengerLastInboundAt,
+    };
+
+    // canSend 再チェック（送信直前の安全確認）
+    const canSendResult = adapter.canSend(channelContact, {
+      campaignId: run.campaignId,
+      campaignName: "",
+    });
+
+    if (!canSendResult.available) {
+      // フォールバックを試行
+      if (channel !== "mail") {
+        const mailAdapter = getAdapter("mail");
+        const mailCheck = mailAdapter.canSend(channelContact, {
+          campaignId: run.campaignId,
+          campaignName: "",
+        });
+
+        if (mailCheck.available) {
+          const mailResult = await mailAdapter.send(
+            { body: message.body, angle: message.angle },
+            channelContact,
+            {
+              campaignId: run.campaignId,
+              idempotencyKey: generateIdempotencyKey(run.campaignId, target.contactId, "mail"),
+              approvedBy: run.state.approvedBy ?? "unknown",
+              approvedAt: run.state.approvedAt ? new Date(run.state.approvedAt) : new Date(),
+            }
+          );
+          results.push({
+            contactId: target.contactId,
+            channel: "mail",
+            success: mailResult.success,
+            error: mailResult.error,
+          });
+          continue;
+        }
+      }
+
+      results.push({
+        contactId: target.contactId,
+        channel,
+        success: false,
+        error: canSendResult.reason,
+      });
+      continue;
+    }
+
+    // 送信実行
+    const sendResult = await adapter.send(
+      { body: message.body, angle: message.angle },
+      channelContact,
+      {
+        campaignId: run.campaignId,
+        idempotencyKey,
+        approvedBy: run.state.approvedBy ?? "unknown",
+        approvedAt: run.state.approvedAt ? new Date(run.state.approvedAt) : new Date(),
+      }
+    );
+
+    results.push({
+      contactId: target.contactId,
+      channel,
+      success: sendResult.success,
+      error: sendResult.error,
+    });
+  }
+
+  const allFailed = results.length > 0 && results.every((r) => !r.success);
+  if (allFailed) {
+    return {
+      status: "failed",
+      stateUpdate: {},
+      error: "全ターゲットの送信に失敗しました",
+    };
+  }
+
   return {
     status: "completed",
     stateUpdate: {},

@@ -2,9 +2,9 @@
 
 ## 現在の状態
 
-- フェーズ: オーケストレータ設計・プロトタイプ実装完了
-- 実装済み: Next.js 15 初期化、型定義、Prisma スキーマ、AI パイプライン、APIルート、**オーケストレータ（ステートマシン・状態永続化・承認ゲート）**
-- 作業中: 条件ビルダーUI、Contactスクレイパー、オーケストレータのPrisma永続化移行
+- フェーズ: 送信チャネル抽象化完了・プロバイダ統合待ち
+- 実装済み: Next.js 15 初期化、型定義、Prisma スキーマ、AI パイプライン、APIルート、**オーケストレータ（ステートマシン・状態永続化・承認ゲート）**、**送信チャネル抽象化（Mail/LINE/Messenger adapter, ChannelResolver, 監査ログ, Review UI, 冪等性）**
+- 作業中: 条件ビルダーUI、Contactスクレイパー、オーケストレータのPrisma永続化移行、実送信プロバイダ統合
 
 ## 意思決定ログ
 
@@ -21,6 +21,14 @@
   - review ステップで自動的に paused になり、人間が approve() するまで送信に進まないアーキテクチャ
   - 旧 `src/lib/ai/pipeline.ts` は参考用に残し、新設計は `src/lib/orchestrator/` に集約
   - ストアは PipelineStore インターフェースで抽象化し、InMemory → Prisma への移行を容易にする
+- 2026-03-28: **送信チャネル抽象化を導入**
+  - adapter pattern で Mail/LINE/Messenger を統一インターフェースで扱う
+  - ChannelResolver で contact ごとの利用可能チャネル・推奨チャネルを解決
+  - Mail はデフォルト fallback、LINE は連携済みなら候補、Messenger は24時間ルール付き条件付き
+  - 冪等性キー（campaignId+contactId+channel）で二重送信防止
+  - 監査ログで承認・チャネル選択・送信結果を記録
+  - Review UI でチャネル候補表示・選択が可能
+  - 実際の送信プロバイダ（Gmail API, LINE Messaging API, Graph API）は stub
 
 ## 実装予定（優先順）
 
@@ -38,9 +46,17 @@
   - [x] ステップハンドラ（steps.ts — 既存AIモジュールのアダプタ層）
   - [x] 状態ストア（store.ts — InMemory実装 + PipelineStore interface）
   - [x] オーケストレータ本体（orchestrator.ts — start/approve/cancel/getStatus）
+  - [x] APIルート（/api/orchestrator/start, /approve, /status）
+  - [x] 送信チャネル抽象化（src/lib/channels/）
+    - [x] ChannelAdapter interface + Mail/LINE/Messenger adapter
+    - [x] ChannelResolver（contact 単位のチャネル解決）
+    - [x] 冪等性キー生成
+    - [x] 監査ログ（インメモリ）
+    - [x] Review UI コンポーネント（チャネル選択付き）
+    - [x] ユニットテスト（20テスト通過）
   - [ ] PrismaベースのPipelineStore実装
   - [ ] BullMQジョブキューとの統合
-  - [ ] APIルート（/api/orchestrator/start, /approve, /status）
+  - [ ] 実送信プロバイダ統合（Gmail API, LINE Messaging API, Graph API）
 - [ ] 条件ビルダーUI
 - [ ] Contactスクレイパー（Twitter/Connpass）
 - [ ] 送信キュー（BullMQ）
@@ -55,9 +71,12 @@
 
 - PostgreSQL接続設定 + prisma migrate dev
 - PrismaベースのPipelineStore実装（InMemory → PostgreSQL移行）
-- オーケストレータ用APIルート（/api/orchestrator/*）
+- 監査ログの Prisma 永続化（InMemory → AuditLog テーブル）
 - BullMQとオーケストレータの統合（送信ステップのキュー化）
+- 実送信プロバイダ統合（Gmail API, LINE Messaging API, Graph API）
+- Review UI のページ統合（ReviewPanel をルートページに組み込み）
 - 条件ビルダーUI プロトタイプ
 - Contactスクレイパー（Twitter/Connpass）の初期実装
 - Gitea リポジトリ作成 + 初回push
 - パイプラインの結合テスト（実際のClaude API呼び出し）
+- E2E テスト（パイプライン全体のインテグレーションテスト）
